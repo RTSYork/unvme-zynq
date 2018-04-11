@@ -33,6 +33,7 @@ SHELL:=/bin/bash
 
 # Default compilation flags
 CFLAGS?=-O2
+CFLAGS+=-mcpu=native
 CFLAGS+=-Wall -fPIC
 CPPFLAGS+=-D_GNU_SOURCE
 
