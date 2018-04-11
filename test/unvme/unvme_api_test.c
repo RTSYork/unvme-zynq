@@ -142,7 +142,7 @@ int main(int argc, char** argv)
             nlb = random() % maxnlb + 1;
             size = nlb * ns->blocksize;
             p = buf[i];
-            bzero(p, size);
+            for (int i = 0; i < size/sizeof(u64); i++) p[i] = 0;
             VERBOSE("  aread.%-2d  %#8x %p %#lx\n", i, nlb, p, slba);
             if (!(iod[i] = unvme_aread(ns, q, p, slba, nlb)))
                 errx(1, "aread.%d failed", i);

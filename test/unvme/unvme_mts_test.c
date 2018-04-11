@@ -132,7 +132,7 @@ void* test_queue(void* arg)
             nlb = buflen[i] / ns->blocksize;
             wlen = buflen[i] / sizeof (u64);
             p = buf[i];
-            bzero(p, buflen[i]);
+            for (int i = 0; i < buflen[i]/sizeof(u64); i++) p[i] = 0;
             if (unvme_read(ns, ses->qid, p, slba, nlb))
                 errx(1, "read.%d.%d.%d failed", ses->id, ses->qid, i);
             for (w = 0; w < wlen; w++) {

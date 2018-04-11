@@ -118,7 +118,7 @@ int main(int argc, char** argv)
         stat = unvme_write(ns, q, p, slba, nlb);
         if (stat)
             errx(1, "unvme_write failed: slba=%#lx nlb=%#lx stat=%#x", slba, nlb, stat);
-        memset(p, 0, nlb * ns->blocksize);
+        for (int i = 0; i < (nlb * ns->blocksize) / sizeof(u64); i++) p[i] = 0;
         stat = unvme_read(ns, q, p, slba, nlb);
         if (stat)
             errx(1, "unvme_read failed: slba=%#lx nlb=%#lx stat=%#x", slba, nlb, stat);
