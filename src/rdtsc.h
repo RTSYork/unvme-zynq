@@ -39,29 +39,24 @@
 
 #include <stdint.h>
 #include <unistd.h>
+#include <time.h>
 
 
 /**
- * Read tsc.
- * @return  tsc value.
+ * Read CLOCK_MONOTONIC_RAW value.
+ * @return  clock value in ns.
  */
 static inline uint64_t rdtsc(void)
 {
-    union {
-        uint64_t val;
-        struct {
-            uint32_t lo;
-            uint32_t hi;
-        };
-    } tsc;
-    asm volatile ("rdtsc" : "=a" (tsc.lo), "=d" (tsc.hi));
-    return tsc.val;
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return ts.tv_sec * 1000000000LL + ts.tv_nsec;
 }
 
 /**
- * Get the elapsed tsc since the specified started tsc.
- * @param   tsc         started tsc
- * @return  number of tsc elapsed.
+ * Get the elapsed time since the specified started time.
+ * @param   tsc         started time
+ * @return  number of ns elapsed.
  */
 static inline uint64_t rdtsc_elapse(uint64_t tsc) {
     int64_t et;
@@ -72,23 +67,11 @@ static inline uint64_t rdtsc_elapse(uint64_t tsc) {
 }
 
 /**
- * Get tsc per second using sleeping for 1/100th of a second.
+ * Get ns per second.
  */
 static inline uint64_t rdtsc_second()
 {
-    static uint64_t tsc_ps = 0;
-    if (!tsc_ps) {
-        uint64_t t0 = rdtsc();
-        usleep(1000);
-        uint64_t t1 = rdtsc();
-        usleep(1000);
-        uint64_t t2 = rdtsc();
-        t2 -= t1;
-        t1 -= t0;
-        if (t2 > t1) t2 = t1;
-        tsc_ps = t2 * 1000;
-    }
-    return tsc_ps;
+    return 1000000000LL;
 }
 
 #endif // _RDTSC_H
