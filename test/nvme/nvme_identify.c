@@ -34,6 +34,7 @@
  * @brief Invoke NVMe identify command.
  */
 
+#include <string.h>
 #include "nvme_common.c"
 
 
@@ -123,7 +124,8 @@ int main(int argc, char* argv[])
 
     if (nvme_acmd_identify(nvmedev, 0, dma->addr, dma->addr + 4096))
         errx(1, "nvme_acmd_identify 0");
-    nvme_identify_ctlr_t* ctlr = dma->buf;
+    nvme_identify_ctlr_t* ctlr = malloc(sizeof(nvme_identify_ctlr_t));
+    memcpy(ctlr, dma->buf, sizeof(nvme_identify_ctlr_t));
     print_controller(ctlr);
 
     u64 nsaddr = dma->addr + 8192;
@@ -143,6 +145,7 @@ int main(int argc, char* argv[])
         }
     }
 
+    free(ctlr);
     vfio_dma_free(dma);
     nvme_cleanup();
 
