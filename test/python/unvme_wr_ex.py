@@ -100,7 +100,7 @@ class WRTest:
 # Main program.
 parser = argparse.ArgumentParser(description='RANDOM WRITE-READ TEST EXAMPLE', add_help=False)
 parser.add_argument('--ioc', help='number of IOs per test', type=int, default=8)
-parser.add_argument('--nlb', help='max number of blocks per IO', type=int, default=65536)
+parser.add_argument('--nlb', help='max number of blocks per IO', type=int, default=8192)
 parser.add_argument('pci', help='PCI device name (as 0a:00.0[/1] format)')
 if len(sys.argv) == 1:
     parser.print_help()

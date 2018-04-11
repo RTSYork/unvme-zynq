@@ -49,8 +49,8 @@
 
 // Global variables
 static int numses = 4;          ///< number of thread sessions
-static int qcount = 4;          ///< number of queues per session
-static int maxnlb = 1024;       ///< maximum number of blocks per IO
+static int qcount = 2;          ///< number of queues per session
+static int maxnlb = 32;         ///< maximum number of blocks per IO
 static sem_t sm_ready;          ///< semaphore for ready
 static sem_t sm_start;          ///< semaphore for start
 static const unvme_ns_t* ns;    ///< driver namespace handle
@@ -198,8 +198,8 @@ int main(int argc, char* argv[])
 {
     const char* usage = "Usage: %s [OPTION]... PCINAME\n\
            -t THREADS  number of thread sessions (default 4)\n\
-           -q QCOUNT   number of queues per session (default 4)\n\
-           -m MAXNLB   maximum number of blocks per I/O (default 1024)\n\
+           -q QCOUNT   number of queues per session (default 2)\n\
+           -m MAXNLB   maximum number of blocks per I/O (default 32)\n\
            PCINAME     PCI device name (as 01:00.0[/1] format)";
 
     char* prog = strrchr(argv[0], '/');
