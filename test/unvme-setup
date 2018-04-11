@@ -48,10 +48,6 @@ errx() {
 vfio_check() {
     modprobe vfio-pci
     [ $? -ne 0 ] && exit 1
-    if [ -z "$(ls /sys/kernel/iommu_groups)" ]; then
-        echo "/sys/kernel/iommu_groups is empty"
-        errx "UNVMe requires VFIO, IOMMU, and VT-d enabled"
-    fi
 }
 
 # 
