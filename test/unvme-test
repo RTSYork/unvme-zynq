@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 PROG=$(basename "$0")
 PDIR=$(dirname $(readlink -f $0))
