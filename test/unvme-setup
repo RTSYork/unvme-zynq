@@ -90,7 +90,7 @@ unvme_kill() {
     n=0
     while true; do
         [ -z "$(pgrep -f "unvmed .*$k")" ] && break
-        usleep 100000
+        sleep 0.1
         n=$((n+1))
         [ $n -gt 5 ] && errx "can't kill unvmed $1"
     done
@@ -112,7 +112,7 @@ unvme_unbind() {
 
     n=0
     while true; do
-        usleep 100000
+        sleep 0.1
         [ ! -e /sys/bus/pci/devices/$f/driver ] && break
         n=$((n+1))
         if [ $n -gt 20 ]; then
@@ -138,7 +138,7 @@ unvme_bind() {
 
         n=0
         while true; do
-            usleep 100000
+            sleep 0.1
             [ -e /sys/bus/pci/drivers/vfio-pci/$f ] && break
             n=$((n+1))
             [ $n -gt 20 ] && errx "can't bind $1 to vfio-pci"
@@ -166,7 +166,7 @@ unvme_load() {
         fi
 
         # wait for status
-        while [ ! -s ${tmp} ]; do usleep 100000; done
+        while [ ! -s ${tmp} ]; do sleep 0.1; done
 
         if [ -z "$(egrep $1.*loaded ${tmp})" ]; then
             cat ${tmp}
