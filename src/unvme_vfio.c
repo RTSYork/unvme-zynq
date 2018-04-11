@@ -52,7 +52,9 @@
 #define FATAL(fmt, arg...)  do { ERROR(fmt, ##arg); abort(); } while (0)
 
 /// Starting device DMA address
-#define VFIO_IOVA           0x800000000
+#define UIO_BASE 0x40000000
+/// Size of UIO buffer/device
+#define UIO_SIZE 0x40000000
 
 /// IRQ index names
 const char* vfio_irq_names[] = { "INTX", "MSI", "MSIX", "ERR", "REQ" };
@@ -102,31 +104,18 @@ static vfio_mem_t* vfio_mem_alloc(vfio_device_t* dev, size_t size, void* pmb)
     if (pmb) {
         mem->dma.buf = pmb;
     } else {
-        mem->dma.buf = mmap(0, size, PROT_READ|PROT_WRITE,
-                            MAP_PRIVATE|MAP_ANONYMOUS|MAP_LOCKED, -1, 0);
-        if (mem->dma.buf == MAP_FAILED)
-            FATAL("mmap: %s", strerror(errno));
-        mem->mmap = 1;
+        if (dev->uiobufoff + size > UIO_SIZE) {
+            ERROR("Out of UIO memory space (next allocation would use %#lx of %#lx)", dev->uiobufoff + size, UIO_SIZE);
+            free(mem);
+            return NULL;
+        }
+        mem->dma.buf = dev->uiobuf + dev->uiobufoff;
+        dev->uiobufoff += size;
     }
 
     pthread_mutex_lock(&dev->lock);
-    struct vfio_iommu_type1_dma_map map = {
-        .argsz = sizeof(map),
-        .flags = (VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE),
-        .size = (__u64)size,
-        .vaddr = (__u64)mem->dma.buf,
-#ifdef UNVME_IDENTITY_MAP_DMA
-        .iova = (__u64)mem->dma.buf & dev->iovamask,
-#else
-        .iova = dev->iovanext,
-#endif
-    };
-
-    if (ioctl(dev->contfd, VFIO_IOMMU_MAP_DMA, &map) < 0) {
-        FATAL("VFIO_IOMMU_MAP_DMA: %s", strerror(errno));
-    }
     mem->dma.size = size;
-    mem->dma.addr = map.iova;
+    mem->dma.addr = dev->iovanext;
     mem->dma.mem = mem;
     mem->dev = dev;
 
@@ -141,8 +130,8 @@ static vfio_mem_t* vfio_mem_alloc(vfio_device_t* dev, size_t size, void* pmb)
         dev->memlist->prev->next = mem;
         dev->memlist->prev = mem;
     }
-    dev->iovanext = map.iova + size;
-    DEBUG_FN("%x %#lx %#lx %#lx", dev->pci, map.iova, map.size, dev->iovanext);
+    dev->iovanext += size;
+    DEBUG_FN("%x %#lx %#lx %#lx %#lx", dev->pci, mem->dma.addr, size, dev->iovanext, dev->uiobufoff);
     pthread_mutex_unlock(&dev->lock);
 
     return mem;
@@ -157,35 +146,26 @@ int vfio_mem_free(vfio_mem_t* mem)
 {
     vfio_device_t* dev = mem->dev;
 
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .size = (__u64)mem->dma.size,
-        .iova = mem->dma.addr,
-    };
-
-    // unmap and free dma memory
-    if (mem->dma.buf) {
-        if (ioctl(dev->contfd, VFIO_IOMMU_UNMAP_DMA, &unmap) < 0)
-            FATAL("VFIO_IOMMU_UNMAP_DMA: %s", strerror(errno));
-    }
-    if (mem->mmap) {
-        if (munmap(mem->dma.buf, mem->dma.size) < 0)
-            FATAL("munmap: %s", strerror(errno));
-    }
-
     // remove node from memory list
     pthread_mutex_lock(&dev->lock);
-    if (mem->next == dev->memlist) dev->iovanext -= mem->dma.size;
-    if (mem->next == mem) {
+    if (mem->next == dev->memlist) { // If removing last item in list
+        dev->iovanext -= mem->dma.size;
+        dev->uiobufoff -= mem->dma.size;
+    }
+    if (mem->next == mem) { // If removing only item in list
         dev->memlist = NULL;
         dev->iovanext = dev->iovabase;
-    } else {
+        dev->uiobufoff = 0;
+    } else { // If there are other items in list
         mem->next->prev = mem->prev;
         mem->prev->next = mem->next;
-        if (dev->memlist == mem) dev->memlist = mem->next;
-        dev->iovanext = dev->memlist->prev->dma.addr + dev->memlist->prev->dma.size;
+        if (dev->memlist == mem) { // If first item in list
+            dev->memlist = mem->next;
+        }
+        dev->iovanext = dev->memlist->prev->dma.addr + dev->memlist->prev->dma.size; // IOVA next is after last item in list
+        dev->uiobufoff = dev->iovanext - dev->iovabase; // UIO buffer offset is same as IOVA offset
     }
-    DEBUG_FN("%x %#lx %#lx %#lx", dev->pci, unmap.iova, unmap.size, dev->iovanext);
+    DEBUG_FN("%x %#lx %#lx %#lx %#lx", dev->pci, mem->dma.addr, mem->dma.size, dev->iovanext, dev->uiobufoff);
     pthread_mutex_unlock(&dev->lock);
 
     free(mem);
@@ -312,10 +292,9 @@ vfio_device_t* vfio_create(vfio_device_t* dev, int pci)
     if ((i = readlink(path, path, sizeof(path))) < 0)
         FATAL("No iommu_group associated with device %s", pciname);
     path[i] = 0;
-    sprintf(path, "/dev/vfio%s", strrchr(path, '/'));
+    sprintf(path, "/dev/vfio/noiommu-%s", &strrchr(path, '/')[1]);
     
     struct vfio_group_status group_status = { .argsz = sizeof(group_status) };
-    struct vfio_iommu_type1_info iommu_info = { .argsz = sizeof(iommu_info) };
     struct vfio_device_info dev_info = { .argsz = sizeof(dev_info) };
 
     // allocate and initialize device context
@@ -323,7 +302,7 @@ vfio_device_t* vfio_create(vfio_device_t* dev, int pci)
     else dev->ext = 1;
     dev->pci = pci;
     dev->pagesize = sysconf(_SC_PAGESIZE);
-    dev->iovabase = VFIO_IOVA;
+    dev->iovabase = UIO_BASE;
     dev->iovanext = dev->iovabase;
     if (pthread_mutex_init(&dev->lock, 0)) return NULL;
 
@@ -334,7 +313,7 @@ vfio_device_t* vfio_create(vfio_device_t* dev, int pci)
     if (ioctl(dev->contfd, VFIO_GET_API_VERSION) != VFIO_API_VERSION)
         FATAL("ioctl VFIO_GET_API_VERSION");
 
-    if (ioctl(dev->contfd, VFIO_CHECK_EXTENSION, VFIO_TYPE1_IOMMU) == 0)
+    if (ioctl(dev->contfd, VFIO_CHECK_EXTENSION, VFIO_NOIOMMU_IOMMU) == 0)
         FATAL("ioctl VFIO_CHECK_EXTENSION");
 
     if ((dev->groupfd = open(path, O_RDWR)) < 0)
@@ -349,11 +328,8 @@ vfio_device_t* vfio_create(vfio_device_t* dev, int pci)
     if (ioctl(dev->groupfd, VFIO_GROUP_SET_CONTAINER, &dev->contfd) < 0)
         FATAL("ioctl VFIO_GROUP_SET_CONTAINER");
 
-    if (ioctl(dev->contfd, VFIO_SET_IOMMU, VFIO_TYPE1_IOMMU) < 0)
+    if (ioctl(dev->contfd, VFIO_SET_IOMMU, VFIO_NOIOMMU_IOMMU) < 0)
         FATAL("ioctl VFIO_SET_IOMMU");
-
-    if (ioctl(dev->contfd, VFIO_IOMMU_GET_INFO, &iommu_info) < 0)
-        FATAL("ioctl VFIO_IOMMU_GET_INFO");
 
     dev->fd = ioctl(dev->groupfd, VFIO_GROUP_GET_DEVICE_FD, pciname);
     if (dev->fd < 0)
@@ -415,37 +391,16 @@ vfio_device_t* vfio_create(vfio_device_t* dev, int pci)
             FATAL("VFIO_DEVICE_GET_IRQ_INFO MSIX count %d != %d", irq.count, dev->msixsize);
     }
 
-#ifdef  UNVME_IDENTITY_MAP_DMA
-    // Set up mask to support identity IOVA map option
-    struct vfio_iommu_type1_dma_map map = {
-        .argsz = sizeof(map),
-        .flags = (VFIO_DMA_MAP_FLAG_READ | VFIO_DMA_MAP_FLAG_WRITE),
-        .iova = dev->iovabase,
-        .size = dev->pagesize,
-    };
-    struct vfio_iommu_type1_dma_unmap unmap = {
-        .argsz = sizeof(unmap),
-        .size = dev->pagesize,
-    };
+    // Open and map UIO device as memory buffer
+    dev->uiofd = open("/dev/uio0", O_RDWR | O_SYNC);
+    if (dev->uiofd == -1)
+        FATAL("unable to open /dev/uio0, %d", errno);
+    dev->uiobuf = mmap(NULL, UIO_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, dev->uiofd, 0);
+    if (dev->uiobuf == MAP_FAILED)
+        FATAL("unable to mmap /dev/uio0, %d", errno);
 
-    map.vaddr = (__u64)mmap(0, map.size, PROT_READ|PROT_WRITE,
-                            MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
-    if ((void*)map.vaddr == MAP_FAILED)
-            FATAL("mmap: %s", strerror(errno));
-    while (map.iova) {
-        if (ioctl(dev->contfd, VFIO_IOMMU_MAP_DMA, &map) < 0) {
-            if (errno == EFAULT) break;
-            FATAL("VFIO_IOMMU_MAP_DMA: %s", strerror(errno));
-        }
-        unmap.iova = map.iova;
-        if (ioctl(dev->contfd, VFIO_IOMMU_UNMAP_DMA, &unmap) < 0)
-            FATAL("VFIO_IOMMU_MUNAP_DMA: %s", strerror(errno));
-        map.iova <<= 1;
-    }
-    dev->iovamask = map.iova - 1;
-    (void) munmap((void*)map.vaddr, map.size);
-    DEBUG_FN("iovamask=%#llx", dev->iovamask);
-#endif
+    if (mlock(dev->uiobuf, UIO_SIZE) == -1)
+        FATAL("unable to mlock, %d", errno);
 
     return (vfio_device_t*)dev;
 }
@@ -458,6 +413,11 @@ void vfio_delete(vfio_device_t* dev)
 {
     if (!dev) return;
     DEBUG_FN("%x", dev->pci);
+
+    // Close and unmap UIO buffer
+    munlock(dev->uiobuf, UIO_SIZE);
+    munmap(dev->uiobuf, UIO_SIZE);
+    close(dev->uiofd);
 
     // free all memory associated with the device
     while (dev->memlist) vfio_mem_free(dev->memlist);

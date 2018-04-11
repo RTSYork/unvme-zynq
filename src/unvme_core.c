@@ -38,6 +38,7 @@
 #include <string.h>
 #include <signal.h>
 #include <sched.h>
+#include <fcntl.h>
 
 #include "rdtsc.h"
 #include "unvme_core.h"
@@ -199,9 +200,6 @@ static u16 unvme_get_cid(unvme_desc_t* desc)
 static u64 unvme_map_dma(const unvme_ns_t* ns, void* buf, u64 bufsz)
 {
     unvme_device_t* dev = ((unvme_session_t*)ns->ses)->dev;
-#ifdef UNVME_IDENTITY_MAP_DMA
-    u64 addr = (u64)buf & dev->vfiodev.iovamask;
-#else
     vfio_dma_t* dma = NULL;
     unvme_lockr(&dev->iomem.lock);
     int i;
@@ -215,7 +213,6 @@ static u64 unvme_map_dma(const unvme_ns_t* ns, void* buf, u64 bufsz)
     u64 addr = dma->addr + (u64)(buf - dma->buf);
     if ((addr + bufsz) > (dma->addr + dma->size))
         FATAL("buffer overrun");
-#endif
     //if ((addr & (ns->blocksize - 1)) != 0)
     //    FATAL("unaligned buffer address");
     return addr;
@@ -494,7 +491,9 @@ unvme_ns_t* unvme_do_open(int pci, int nsid, int qcount, int qsize)
         vfio_dma_t* dma = vfio_dma_alloc(&dev->vfiodev, 4096);
         if (nvme_acmd_identify(&dev->nvmedev, 0, dma->addr, 0))
             FATAL("nvme_acmd_identify controller failed");
-        nvme_identify_ctlr_t* idc = (nvme_identify_ctlr_t*)dma->buf;
+        nvme_identify_ctlr_t* idc = malloc(sizeof(nvme_identify_ctlr_t));
+        memcpy(idc, dma->buf, sizeof(nvme_identify_ctlr_t));
+
         if (nsid > idc->nn) {
             ERROR("invalid %06x nsid %d (max %d)", pci, nsid, idc->nn);
             return NULL;
@@ -523,6 +522,7 @@ unvme_ns_t* unvme_do_open(int pci, int nsid, int qcount, int qsize)
             int mp = 2 << (idc->mdts - 1);
             if (ns->maxppio > mp) ns->maxppio = mp;
         }
+        free(idc);
         vfio_dma_free(dma);
 
         // get max number of queues supported
@@ -539,6 +539,7 @@ unvme_ns_t* unvme_do_open(int pci, int nsid, int qcount, int qsize)
         ns->qsize = qsize;
 
         // setup IO queues
+        DEBUG_FN("Creating %d IO queues (of max %d), queue size %d", qcount, maxqcount, qsize);
         dev->ioqs = zalloc(qcount * sizeof(unvme_queue_t));
         for (i = 0; i < qcount; i++) unvme_ioq_create(dev, i);
     }

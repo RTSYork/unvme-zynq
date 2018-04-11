@@ -74,6 +74,9 @@ typedef struct _vfio_device {
     __u64                   iovamask;   ///< max IO virtual address mask
     pthread_mutex_t         lock;       ///< multithreaded lock
     vfio_mem_t*             memlist;    ///< memory allocated list
+    int                     uiofd;      ///< file descriptor of UIO device
+    void*                   uiobuf;     ///< UIO buffer pointer
+    off_t                   uiobufoff;  ///< UIO buffer offset
 } vfio_device_t;
 
 // Export functions
