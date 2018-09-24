@@ -3,6 +3,11 @@ UNVMe - A User Space NVMe Driver
 
 UNVMe is a user space NVMe driver developed at Micron Technology.
 
+**This version of the driver has been modified to work on the ARM64 processors
+of the Xilinx Zynq UltraScale+ architecture, rather than UNVMe's original
+target of x86-64. Note that instructions and requirements below are for the
+original UNVMe project, and have not yet been updated to reflect the changes.**
+
 The driver in this model is implemented as a library (libunvme.a) that
 applications can be linked with.  Upon start, an application will first
 initialize the NVMe device(s) and then, afterward, it can submit and process
